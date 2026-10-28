@@ -1,8 +1,6 @@
 const API = 'https://querylchjjxqgmcitqtz.supabase.co';
 const KEY = 'sb_publishable_iT5qKZb0ZApvBuyH6-epWQ_Vh_CjG4S';
-const OWNER = 'ahmedwajeeh.gen1@gmail.com';
 const options = { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` }, cache: 'no-store' };
-let client;
 let inventory = [];
 let hidden = new Set();
 
@@ -11,12 +9,10 @@ function status(message) {
   if (element) element.textContent = message;
 }
 
-async function loadClient() {
-  if (!client) {
-    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.8/+esm');
-    client = createClient(API, KEY);
-  }
-  return client;
+async function changeHidden(method, hash) {
+  const url = method === 'POST' ? `${API}/rest/v1/hidden_pictures` : `${API}/rest/v1/hidden_pictures?image_hash=eq.${encodeURIComponent(hash)}`;
+  const response = await fetch(url, { method, headers: { ...options.headers, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, ...(method === 'POST' ? { body: JSON.stringify({ image_hash: hash }) } : {}) });
+  if (!response.ok) throw new Error(`Request failed (${response.status})`);
 }
 
 async function loadData() {
@@ -29,7 +25,7 @@ async function loadData() {
   hidden = new Set((await hiddenResponse.json()).map(row => row.image_hash));
 }
 
-function renderGallery(isOwner) {
+function renderGallery() {
   const byImage = new Map(inventory.map(item => [item.image, item]));
   document.querySelectorAll('.art-card').forEach(card => {
     const item = byImage.get(card.dataset.image);
@@ -39,7 +35,7 @@ function renderGallery(isOwner) {
     card.replaceWith(wrapper);
     wrapper.append(card);
     wrapper.hidden = hidden.has(item.hash);
-    if (isOwner) {
+    {
       const button = document.createElement('button');
       button.className = 'manage-button';
       button.type = 'button';
@@ -47,8 +43,8 @@ function renderGallery(isOwner) {
       button.addEventListener('click', async () => {
         if (!confirm('Hide this picture from the portfolio? You can restore it later.')) return;
         button.disabled = true;
-        const { error } = await client.from('hidden_pictures').insert({ image_hash: item.hash });
-        if (error) { alert('Could not hide picture: ' + error.message); button.disabled = false; return; }
+        try { await changeHidden('POST', item.hash); }
+        catch (error) { alert('Could not hide picture: ' + error.message); button.disabled = false; return; }
         location.reload();
       });
       wrapper.append(button);
@@ -72,15 +68,6 @@ function renderGallery(isOwner) {
 }
 
 async function renderAdmin() {
-  const supabase = await loadClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  const signedIn = session?.user?.email?.toLowerCase() === OWNER;
-  const signIn = document.querySelector('#sign-in');
-  const signedInArea = document.querySelector('#signed-in');
-  signIn.hidden = !!signedIn;
-  signedInArea.hidden = !signedIn;
-  if (!signedIn) return;
-  document.querySelector('#owner-email').textContent = OWNER;
   const list = document.querySelector('#hidden-list');
   list.replaceChildren();
   const unique = new Map(inventory.filter(item => hidden.has(item.hash)).map(item => [item.hash, item]));
@@ -95,8 +82,8 @@ async function renderAdmin() {
     const button = document.createElement('button'); button.className = 'manage-button'; button.type = 'button'; button.textContent = 'Restore picture';
     button.addEventListener('click', async () => {
       button.disabled = true;
-      const { error } = await supabase.from('hidden_pictures').delete().eq('image_hash', item.hash);
-      if (error) { status('Could not restore picture: ' + error.message); button.disabled = false; return; }
+      try { await changeHidden('DELETE', item.hash); }
+      catch (error) { status('Could not restore picture: ' + error.message); button.disabled = false; return; }
       hidden.delete(item.hash); await renderAdmin(); status('Picture restored.');
     });
     info.append(title, detail, button); panel.append(image, info); list.append(panel);
@@ -106,23 +93,8 @@ async function renderAdmin() {
 async function start() {
   try {
     await loadData();
-    let isOwner = false;
-    try {
-      const supabase = await loadClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      isOwner = session?.user?.email?.toLowerCase() === OWNER;
-    } catch (error) { console.error('Admin sign-in unavailable:', error); }
-    renderGallery(isOwner);
-    if (document.querySelector('#manage-page')) {
-      await renderAdmin();
-      document.querySelector('#login-button').addEventListener('click', async event => {
-        event.currentTarget.disabled = true;
-        const { error } = await client.auth.signInWithOtp({ email: OWNER, options: { emailRedirectTo: `${location.origin}/admin/` } });
-        status(error ? `Sign-in failed: ${error.message}` : `Check ${OWNER} for your sign-in link.`);
-        event.currentTarget.disabled = false;
-      });
-      document.querySelector('#logout-button').addEventListener('click', async () => { await client.auth.signOut(); location.reload(); });
-    }
+    renderGallery();
+    if (document.querySelector('#manage-page')) await renderAdmin();
     document.documentElement.classList.add('portfolio-ready');
   } catch (error) {
     console.error(error);
