@@ -40,3 +40,5 @@ html:not(.portfolio-ready) .gallery,html:not(.portfolio-ready) .category-grid{vi
 .hidden-item p{font-size:14px;margin:8px 0}
 .text-button{border:0;background:none;color:#fff;text-decoration:underline;cursor:pointer;font:inherit}
 .portfolio-error-message{color:#fff;padding-top:20px}
+
+html:not(.portfolio-ready) .video-grid,html:not(.portfolio-ready) .video-collections{visibility:hidden}

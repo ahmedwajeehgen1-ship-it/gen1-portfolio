@@ -16,12 +16,13 @@ async function changeHidden(method, hash) {
 }
 
 async function loadData() {
-  const [listResponse, hiddenResponse] = await Promise.all([
+  const [listResponse, videoResponse, hiddenResponse] = await Promise.all([
     fetch('/portfolio-data.json', { cache: 'no-store' }),
+    fetch('/video-data.json', { cache: 'no-store' }),
     fetch(`${API}/rest/v1/hidden_pictures?select=image_hash`, options)
   ]);
-  if (!listResponse.ok || !hiddenResponse.ok) throw new Error('Could not load the portfolio. Please try again.');
-  inventory = await listResponse.json();
+  if (!listResponse.ok || !videoResponse.ok || !hiddenResponse.ok) throw new Error('Could not load the portfolio. Please try again.');
+  inventory = [...await listResponse.json(), ...await videoResponse.json()];
   hidden = new Set((await hiddenResponse.json()).map(row => row.image_hash));
 }
 
@@ -52,7 +53,7 @@ function renderGallery() {
   });
   document.querySelectorAll('.category-card').forEach(card => {
     const slug = new URL(card.href).pathname.split('/').filter(Boolean)[0];
-    const items = inventory.filter(item => item.image.split('/')[2] === slug && !hidden.has(item.hash));
+    const items = inventory.filter(item => item.media !== 'video' && item.image.split('/')[2] === slug && !hidden.has(item.hash));
     card.querySelector('small').textContent = `${items.length} pieces`;
     if (items.length) card.querySelector('img').src = items[0].thumb;
     else card.hidden = true;
@@ -67,11 +68,42 @@ function renderGallery() {
   }
 }
 
+function renderVideos() {
+  const byUrl = new Map(inventory.filter(item => item.media === 'video').map(item => [item.image, item]));
+  document.querySelectorAll('.video-card').forEach(card => {
+    const item = byUrl.get(card.querySelector('video')?.getAttribute('src'));
+    if (!item) return;
+    card.hidden = hidden.has(item.hash);
+    const button = document.createElement('button');
+    button.className = 'manage-button'; button.type = 'button'; button.textContent = 'Hide video';
+    button.addEventListener('click', async () => {
+      if (!confirm('Hide this video from the portfolio? You can restore it later.')) return;
+      button.disabled = true;
+      try { await changeHidden('POST', item.hash); }
+      catch (error) { alert('Could not hide video: ' + error.message); button.disabled = false; return; }
+      location.reload();
+    });
+    card.append(button);
+  });
+  document.querySelectorAll('.video-collection').forEach(card => {
+    const slug = new URL(card.href).pathname.split('/').filter(Boolean).at(-1);
+    const count = inventory.filter(item => item.media === 'video' && item.slug === slug && !hidden.has(item.hash)).length;
+    card.querySelector('small').textContent = `${count} videos`;
+  });
+  const grid = document.querySelector('.video-grid');
+  if (grid) {
+    const count = [...grid.querySelectorAll('.video-card')].filter(card => !card.hidden).length;
+    const eyebrow = document.querySelector('.category-hero .eyebrow');
+    if (eyebrow) eyebrow.lastChild.textContent = ` VIDEO PORTFOLIO / ${count} VIDEOS`;
+  }
+}
+
 async function renderAdmin() {
   const list = document.querySelector('#hidden-list');
   list.replaceChildren();
   const unique = new Map(inventory.filter(item => hidden.has(item.hash)).map(item => [item.hash, item]));
-  document.querySelector('#hidden-count').textContent = `${unique.size} hidden pictures`;
+  const videos = [...unique.values()].filter(item => item.media === 'video').length;
+  document.querySelector('#hidden-count').textContent = `${unique.size - videos} hidden pictures · ${videos} hidden videos`;
   for (const item of unique.values()) {
     const panel = document.createElement('article');
     panel.className = 'hidden-item';
@@ -79,12 +111,12 @@ async function renderAdmin() {
     const info = document.createElement('div');
     const title = document.createElement('strong'); title.textContent = item.company;
     const detail = document.createElement('p'); detail.textContent = `${item.category} · ${item.type}`;
-    const button = document.createElement('button'); button.className = 'manage-button'; button.type = 'button'; button.textContent = 'Restore picture';
+    const button = document.createElement('button'); button.className = 'manage-button'; button.type = 'button'; button.textContent = item.media === 'video' ? 'Restore video' : 'Restore picture';
     button.addEventListener('click', async () => {
       button.disabled = true;
       try { await changeHidden('DELETE', item.hash); }
-      catch (error) { status('Could not restore picture: ' + error.message); button.disabled = false; return; }
-      hidden.delete(item.hash); await renderAdmin(); status('Picture restored.');
+      catch (error) { status('Could not restore item: ' + error.message); button.disabled = false; return; }
+      hidden.delete(item.hash); await renderAdmin(); status('Item restored.');
     });
     info.append(title, detail, button); panel.append(image, info); list.append(panel);
   }
@@ -94,6 +126,7 @@ async function start() {
   try {
     await loadData();
     renderGallery();
+    renderVideos();
     if (document.querySelector('#manage-page')) await renderAdmin();
     document.documentElement.classList.add('portfolio-ready');
   } catch (error) {
